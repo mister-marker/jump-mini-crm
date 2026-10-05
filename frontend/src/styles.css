@@ -171,6 +171,14 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .sheet-body { min-height: 0; overflow-y: auto; padding: 5px 28px 25px; overscroll-behavior: contain; }
 .lead-form { display: flex; flex-direction: column; min-height: 0; }
 .form-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+.source-readonly { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; color: #93a3ba; font-size: 13px; }
+.source-readonly strong { color: #e1eaf4; font-weight: 550; text-align: right; }
+.new-source { display: flex; gap: 8px; margin: 9px 0 16px; }
+.new-source input { min-width: 0; flex: 1; }
+.new-source .btn { flex: 0 0 auto; }
+.source-filter { display: flex; align-items: center; gap: 12px; padding: 11px 20px; border-top: 1px solid #2d3b4e; }
+.source-filter label { margin: 0; white-space: nowrap; color: #94a3b8; font-size: 12px; }
+.source-filter select { width: min(280px, 100%); min-height: 36px; padding: 7px 10px; font-size: 12px; }
 .tag-options { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 5px; }
 .tag-option { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #3a475b; background: #202d40; padding: 8px 11px; border-radius: 8px; font-size: 12px; }
 .tag-option.selected { border-color: #91ad6b; background: #30402d; color: #daefc3; }

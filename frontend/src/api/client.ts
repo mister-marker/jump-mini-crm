@@ -1,5 +1,6 @@
 export type Status = 'new' | 'in_progress' | 'done' | 'rejected'
-export type Source = 'bot' | 'manual' | 'telegram' | 'webhook'
+export type Source = string
+export interface SourceOption { id: Source; name: string }
 export interface Tag { id: string; name: string; color: string }
 export interface User { id: string; telegram_id: number | null; role: 'admin' | 'manager' }
 export interface Lead {
@@ -8,6 +9,7 @@ export interface Lead {
   created_at: string; updated_at: string; tags: Tag[]
 }
 export type LeadFields = Pick<Lead, 'name' | 'contact' | 'request' | 'status' | 'next_contact_date'>
+export type NewLeadFields = LeadFields & Pick<Lead, 'source'>
 interface Token { access_token: string; token_type: string; expires_in: number }
 
 const base = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
@@ -74,9 +76,10 @@ export const api = {
   pin: (pin: string) => request<Token>('/auth/pin', { method: 'POST', body: JSON.stringify({ pin }) }),
   telegram: (initData: string) => request<Token>('/auth/telegram', { method: 'POST', body: JSON.stringify({ initData }) }),
   me: () => request<User>('/auth/me'),
-  leads: (filters: { status: string; tag: string; page: number }, signal?: AbortSignal) => {
+  leads: (filters: { status: string; source: string; tag: string; page: number }, signal?: AbortSignal) => {
     const query = new URLSearchParams({ limit: '13', offset: String(filters.page * 12) })
     if (filters.status) query.set('status', filters.status)
+    if (filters.source) query.set('source', filters.source)
     if (filters.tag) query.set('tag_id', filters.tag)
     return request<Lead[]>(`/leads?${query}`, { signal })
   },
@@ -88,8 +91,12 @@ export const api = {
       if (page.length < 100) return all
     }
   },
-  createLead: (fields: LeadFields) => request<Lead>('/leads', {
-    method: 'POST', body: JSON.stringify({ ...fields, source: 'manual' }),
+  sources: (signal?: AbortSignal) => request<SourceOption[]>('/sources', { signal }),
+  createSource: (name: string) => request<SourceOption>('/sources', {
+    method: 'POST', body: JSON.stringify({ name }),
+  }),
+  createLead: (fields: NewLeadFields) => request<Lead>('/leads', {
+    method: 'POST', body: JSON.stringify(fields),
   }),
   updateLead: (id: string, fields: LeadFields) => request<Lead>(`/leads/${id}`, {
     method: 'PATCH', body: JSON.stringify(fields),
@@ -105,7 +112,6 @@ export const api = {
 export const statusLabels: Record<Status, string> = {
   new: 'Новый', in_progress: 'В работе', done: 'Завершён', rejected: 'Отказ',
 }
-export const sourceLabels: Record<Source, string> = {
-  bot: 'Telegram-бот', manual: 'Вручную', telegram: 'Telegram', webhook: 'Веб-форма',
-}
+export const sourceName = (source: Source, options: SourceOption[]) =>
+  options.find(option => option.id === source)?.name || source
 export const errorText = (error: unknown) => error instanceof Error ? error.message : 'Что-то пошло не так. Повторите попытку.'
