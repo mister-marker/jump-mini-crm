@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from postgrest import APIError
 
-from app.api import auth, leads, tags, webhooks
+from app.api import auth, leads, sources, tags, webhooks
 from app.api.deps import DatabaseDep
 from app.core.config import get_settings
 from app.core.supabase import create_supabase
@@ -47,7 +47,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
-for router in (auth.router, leads.router, tags.router, webhooks.router):
+for router in (auth.router, leads.router, sources.router, tags.router, webhooks.router):
     app.include_router(router)
 
 

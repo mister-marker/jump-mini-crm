@@ -6,7 +6,7 @@ from collections import OrderedDict
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Update
+from aiogram.types import MenuButtonCommands, Update
 from supabase import AsyncClient
 
 from app.core.config import Settings
@@ -25,6 +25,8 @@ class BotRuntime:
         self.processed: OrderedDict[int, None] = OrderedDict()
 
     async def start(self) -> None:
+        # A global Web App menu would expose the CRM entry point to applicants.
+        await self.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
         if self.settings.telegram_webhook_url is not None:
             await self.bot.set_webhook(
                 url=str(self.settings.telegram_webhook_url),
@@ -54,7 +56,10 @@ class BotRuntime:
             if message.message_id <= previous_data.get("last_message_id", -1):
                 return
             try:
-                await self.dispatcher.feed_update(self.bot, update, db=self.db)
+                await self.dispatcher.feed_update(
+                    self.bot, update, db=self.db,
+                    crm_web_app_url=str(self.settings.crm_web_app_url),
+                )
                 await context.update_data(last_message_id=message.message_id)
             except Exception:
                 # A failed DB call or Telegram reply must leave the update retryable.

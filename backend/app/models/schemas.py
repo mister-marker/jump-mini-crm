@@ -10,7 +10,7 @@ Name = Annotated[str, Field(min_length=1, max_length=200)]
 Contact = Annotated[str, Field(min_length=1, max_length=320)]
 RequestText = Annotated[str, Field(max_length=10000)]
 Role = Literal["admin", "manager"]
-LeadSource = Literal["bot", "manual", "telegram", "webhook"]
+LeadSource = Annotated[str, Field(min_length=1, max_length=64)]
 LeadStatus = Literal["new", "in_progress", "done", "rejected"]
 
 
@@ -34,11 +34,19 @@ class Tag(TagCreate):
     id: UUID
 
 
+class SourceCreate(Schema):
+    name: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class Source(SourceCreate):
+    id: str
+
+
 class LeadCreate(Schema):
     name: Name
     contact: Contact
     request: RequestText | None = None
-    source: LeadSource = "manual"
+    source: LeadSource
     status: LeadStatus = "new"
     next_contact_date: date | None = None
 

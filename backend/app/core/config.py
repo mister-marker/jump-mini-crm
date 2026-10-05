@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr
     telegram_webhook_secret: SecretStr | None = None
     telegram_webhook_url: HttpUrl | None = None
+    crm_web_app_url: HttpUrl = HttpUrl("https://jump-mini-crm.vercel.app")
     jwt_secret: SecretStr
     jwt_issuer: str = "jump-crm"
     jwt_audience: str = "jump-crm-api"

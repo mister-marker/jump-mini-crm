@@ -7,7 +7,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import MenuButtonCommands, MenuButtonWebApp, Message, ReplyKeyboardRemove, WebAppInfo
 from supabase import AsyncClient
 
 from app.models.schemas import LeadCreate
@@ -26,7 +26,14 @@ class Application(StatesGroup):
     confirm = State()
 
 
-async def start(message: Message, state: FSMContext) -> None:
+async def start(message: Message, state: FSMContext, db: AsyncClient, crm_web_app_url: str) -> None:
+    telegram_id = message.from_user.id if message.from_user else message.chat.id
+    result = await db.table("users").select("role").eq("telegram_id", telegram_id).limit(1).execute()
+    is_staff = bool(result.data and result.data[0]["role"] in ("admin", "manager"))
+    menu = (MenuButtonWebApp(text="Открыть Jump CRM", web_app=WebAppInfo(url=crm_web_app_url))
+            if is_staff else MenuButtonCommands())
+    # Use a chat-specific button; clients never inherit the staff Mini App menu.
+    await message.bot.set_chat_menu_button(chat_id=message.chat.id, menu_button=menu)
     # Stable across retries; a new /start message begins a different application.
     submission_id = uuid5(
         NAMESPACE_URL, f"telegram:{message.bot.id}:{message.chat.id}:{message.message_id}"

@@ -4,8 +4,8 @@ import importlib
 import json
 from unittest.mock import patch
 
-from aiogram.methods import SendMessage
-from aiogram.types import Message
+from aiogram.methods import SendMessage, SetChatMenuButton
+from aiogram.types import MenuButtonCommands, MenuButtonWebApp, Message
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -33,6 +33,10 @@ def client():
     calls = []
     saved_leads = {}
     replies = []
+    menus = []
+    staff_chat_ids = set()
+    saved_sources = [{"id": "bot", "name": "Telegram-бот"},
+                     {"id": "manual", "name": "Не уточнён (ручной ввод)"}]
     failures = {"reply": False, "database": False}
     database_user = {
         "id": str(settings.demo_manager_id), "telegram_id": None,
@@ -42,9 +46,24 @@ def client():
     def database(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         if request.method == "GET" and request.url.path == "/rest/v1/users":
+            if "telegram_id" in request.url.params:
+                chat_id = int(request.url.params["telegram_id"].removeprefix("eq."))
+                return httpx.Response(200, json=[{"role": "manager"}] if chat_id in staff_chat_ids else [])
             return httpx.Response(200, json=[database_user])
+        if request.method == "GET" and request.url.path == "/rest/v1/sources":
+            return httpx.Response(200, json=saved_sources)
+        if request.method == "POST" and request.url.path == "/rest/v1/sources":
+            item = {"id": "33333333-3333-4333-8333-333333333333", **json.loads(request.content)}
+            saved_sources.append(item)
+            return httpx.Response(201, json=[item])
         if request.method == "GET" and request.url.path == "/rest/v1/leads":
             return httpx.Response(200, json=list(saved_leads.values()))
+        if request.method == "POST" and request.url.path == "/rest/v1/leads":
+            body = json.loads(request.content)
+            item = {"id": LEAD_ID, **body, "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z", "tags": []}
+            saved_leads[LEAD_ID] = item
+            return httpx.Response(201, json=[item])
         if request.method == "DELETE" and request.url.path == "/rest/v1/lead_tags":
             lead_id = request.url.params['lead_id'].removeprefix('eq.')
             tag_id = request.url.params['tag_id'].removeprefix('eq.')
@@ -60,12 +79,15 @@ def client():
                 "request": body["p_request"], "source": "bot", "status": "new",
                 "next_contact_date": None, "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
-                "tags": [{"id": TAG_ID, "name": "Telegram-бот", "color": "#6B7280"}],
+                "tags": [],
             })
             return httpx.Response(200, json=body["p_id"])
         raise AssertionError(f"Unexpected database request: {request.method} {request.url}")
 
     async def telegram_request(session, bot, method, timeout=None):
+        if isinstance(method, SetChatMenuButton):
+            menus.append(method)
+            return True
         assert isinstance(method, SendMessage)
         if failures["reply"]:
             failures["reply"] = False
@@ -97,6 +119,9 @@ def client():
             with TestClient(main.app) as test_client:
                 test_client.saved_leads = saved_leads
                 test_client.replies = replies
+                test_client.menus = menus
+                test_client.staff_chat_ids = staff_chat_ids
+                test_client.saved_sources = saved_sources
                 test_client.failures = failures
                 test_client.database_user = database_user
                 yield test_client, calls
@@ -138,6 +163,8 @@ def test_wrong_pin_is_rejected(client):
     ("PATCH", f"/leads/{LEAD_ID}", {"status": "done"}),
     ("DELETE", f"/leads/{LEAD_ID}", None),
     ("GET", "/tags", None),
+    ("GET", "/sources", None),
+    ("POST", "/sources", {"name": "Рекомендация"}),
     ("POST", "/tags", {"name": "Веб-форма"}),
     ("POST", f"/leads/{LEAD_ID}/tags/{TAG_ID}", None),
     ("DELETE", f"/leads/{LEAD_ID}/tags/{TAG_ID}", None),
@@ -158,6 +185,53 @@ def test_me_preserves_manager_role_for_pin_session(client):
     assert response.status_code == 200
     assert response.json()['role'] == 'manager'
     assert response.headers['Cache-Control'] == 'no-store'
+
+
+def test_source_directory_and_admin_only_creation(client):
+    api, _ = client
+    token = api.post('/auth/pin', json={'pin': '2026'}).json()['access_token']
+    headers = {'Authorization': f'Bearer {token}'}
+    response = api.get('/sources', headers=headers)
+    assert response.status_code == 200
+    assert response.json()[0]['id'] == 'bot'
+    assert api.post('/sources', json={'name': 'Рекомендация'}, headers=headers).status_code == 403
+
+
+def test_admin_can_add_source(client):
+    from app.core.security import create_access_token
+    from app.models.schemas import User
+
+    api, _ = client
+    api.database_user['role'] = 'admin'
+    settings = api.app.state.telegram.settings
+    token = create_access_token(User.model_validate(api.database_user), settings, method='telegram')
+    response = api.post('/sources', json={'name': 'Рекомендация'},
+                        headers={'Authorization': f'Bearer {token}'})
+    assert response.status_code == 201
+    assert response.json()['name'] == 'Рекомендация'
+    assert api.saved_sources[-1]['name'] == 'Рекомендация'
+
+
+def test_manual_lead_requires_selected_source(client):
+    api, calls = client
+    token = api.post('/auth/pin', json={'pin': '2026'}).json()['access_token']
+    response = api.post('/leads', headers={'Authorization': f'Bearer {token}'},
+                        json={'name': 'Иван', 'contact': '@ivan'})
+    assert response.status_code == 422
+    assert not any(call.method == 'POST' and call.url.path == '/rest/v1/leads' for call in calls)
+
+
+def test_manual_lead_uses_selected_source_without_automatic_tags(client):
+    api, calls = client
+    token = api.post('/auth/pin', json={'pin': '2026'}).json()['access_token']
+    response = api.post('/leads', headers={'Authorization': f'Bearer {token}'},
+                        json={'name': 'Иван', 'contact': '@ivan',
+                              'source': '33333333-3333-4333-8333-333333333333'})
+    assert response.status_code == 201
+    assert response.json()['source'] == '33333333-3333-4333-8333-333333333333'
+    assert response.json()['tags'] == []
+    insertion = next(call for call in calls if call.method == 'POST' and call.url.path == '/rest/v1/leads')
+    assert json.loads(insertion.content)['source'] == response.json()['source']
 
 
 def test_manager_can_remove_tag_without_deleting_lead(client):
@@ -222,8 +296,8 @@ def test_bot_full_flow_confirmation_and_duplicates(client):
     assert len(api.saved_leads) == 1
     lead = next(iter(api.saved_leads.values()))
     assert (lead["name"], lead["contact"], lead["source"]) == ("Иван", "ivan@example.com", "bot")
-    assert lead["tags"][0]["name"] == "Telegram-бот"
-    assert len(calls) == 1
+    assert lead["tags"] == []
+    assert sum(call.url.path == '/rest/v1/rpc/create_bot_lead' for call in calls) == 1
     fill_application(api, start=10)
     assert send_update(api, 15, "Отправить заявку").status_code == 200
     assert len(api.saved_leads) == 2  # Same person may submit a new application.
@@ -235,7 +309,7 @@ def test_bot_cancel_does_not_create_lead(client, cancel):
     fill_application(api)
     assert send_update(api, 6, cancel).status_code == 200
     assert send_update(api, 7, "Отправить заявку").status_code == 200
-    assert not calls
+    assert not any(call.url.path == '/rest/v1/rpc/create_bot_lead' for call in calls)
     assert " /start" in api.replies[-1].text
 
 
@@ -268,8 +342,9 @@ def test_bot_reply_failure_after_commit_does_not_duplicate_lead(client):
     assert len(api.saved_leads) == 1
     assert send_update(api, 6, "Отправить заявку").status_code == 200
     assert len(api.saved_leads) == 1
-    assert len(calls) == 2
-    assert json.loads(calls[0].content)["p_id"] == json.loads(calls[1].content)["p_id"]
+    submissions = [call for call in calls if call.url.path == '/rest/v1/rpc/create_bot_lead']
+    assert len(submissions) == 2
+    assert json.loads(submissions[0].content)["p_id"] == json.loads(submissions[1].content)["p_id"]
 
 
 def test_bot_validation_and_phone_without_username(client):
@@ -363,7 +438,23 @@ def test_bot_concurrent_delivery_creates_one_lead(client):
         responses = list(pool.map(lambda _: send_update(api, 6, "Отправить заявку"), range(2)))
     assert [response.status_code for response in responses] == [200, 200]
     assert len(api.saved_leads) == 1
-    assert len(calls) == 1
+    assert sum(call.url.path == '/rest/v1/rpc/create_bot_lead' for call in calls) == 1
+
+
+def test_bot_menu_is_private_to_registered_staff(client):
+    api, _ = client
+    assert isinstance(api.menus[0].menu_button, MenuButtonCommands)
+    assert api.menus[0].chat_id is None
+    assert send_update(api, 1, '/start').status_code == 200
+    assert api.menus[-1].chat_id == 101
+    assert isinstance(api.menus[-1].menu_button, MenuButtonCommands)
+    api.staff_chat_ids.add(101)
+    assert send_update(api, 2, '/start').status_code == 200
+    assert isinstance(api.menus[-1].menu_button, MenuButtonWebApp)
+    assert api.menus[-1].menu_button.web_app.url.rstrip('/') == 'https://jump-mini-crm.vercel.app'
+    api.staff_chat_ids.clear()
+    assert send_update(api, 3, '/start').status_code == 200
+    assert isinstance(api.menus[-1].menu_button, MenuButtonCommands)
 
 
 def test_disabled_bot_leaves_other_api_available(client):

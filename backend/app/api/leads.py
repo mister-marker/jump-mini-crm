@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.api.deps import AdminUser, CurrentUser, DatabaseDep
-from app.models.schemas import Lead, LeadCreate, LeadStatus, LeadUpdate
+from app.models.schemas import Lead, LeadCreate, LeadSource, LeadStatus, LeadUpdate
 from app.services.leads import LEAD_SELECT, read_lead
 
 router = APIRouter(prefix="/leads", tags=["Leads"])
@@ -15,6 +15,7 @@ router = APIRouter(prefix="/leads", tags=["Leads"])
 async def list_leads(
     user: CurrentUser, db: DatabaseDep,
     status: LeadStatus | None = None,
+    source: LeadSource | None = None,
     tag_id: UUID | None = None,
     next_contact_date: date | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -25,6 +26,8 @@ async def list_leads(
     query = db.table("leads").select(selection)
     if status:
         query = query.eq("status", status)
+    if source:
+        query = query.eq("source", source)
     if tag_id:
         query = query.eq("filter_tags.tag_id", str(tag_id))
     if next_contact_date:
