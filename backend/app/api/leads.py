@@ -75,3 +75,10 @@ async def assign_tag(
         on_conflict="lead_id,tag_id", ignore_duplicates=True,
     ).execute()
     return await read_lead(db, lead_id)
+
+
+@router.delete("/{lead_id}/tags/{tag_id}", response_model=Lead)
+async def remove_tag(lead_id: UUID, tag_id: UUID, user: CurrentUser, db: DatabaseDep) -> Lead:
+    await read_lead(db, lead_id)
+    await db.table("lead_tags").delete().eq("lead_id", str(lead_id)).eq("tag_id", str(tag_id)).execute()
+    return await read_lead(db, lead_id)

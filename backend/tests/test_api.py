@@ -34,16 +34,22 @@ def client():
     saved_leads = {}
     replies = []
     failures = {"reply": False, "database": False}
+    database_user = {
+        "id": str(settings.demo_manager_id), "telegram_id": None,
+        "role": "manager", "created_at": "2026-01-01T00:00:00Z",
+    }
 
     def database(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         if request.method == "GET" and request.url.path == "/rest/v1/users":
-            return httpx.Response(200, json=[{
-                "id": str(settings.demo_manager_id), "telegram_id": None,
-                "role": "manager", "created_at": "2026-01-01T00:00:00Z",
-            }])
+            return httpx.Response(200, json=[database_user])
         if request.method == "GET" and request.url.path == "/rest/v1/leads":
             return httpx.Response(200, json=list(saved_leads.values()))
+        if request.method == "DELETE" and request.url.path == "/rest/v1/lead_tags":
+            lead_id = request.url.params['lead_id'].removeprefix('eq.')
+            tag_id = request.url.params['tag_id'].removeprefix('eq.')
+            saved_leads[lead_id]['tags'] = [tag for tag in saved_leads[lead_id]['tags'] if tag['id'] != tag_id]
+            return httpx.Response(200, json=[])
         if request.method == "POST" and request.url.path == "/rest/v1/rpc/create_bot_lead":
             body = json.loads(request.content)
             if failures["database"]:
@@ -92,6 +98,7 @@ def client():
                 test_client.saved_leads = saved_leads
                 test_client.replies = replies
                 test_client.failures = failures
+                test_client.database_user = database_user
                 yield test_client, calls
     finally:
         main.app.dependency_overrides.pop(get_settings, None)
@@ -125,6 +132,7 @@ def test_wrong_pin_is_rejected(client):
 
 @pytest.mark.parametrize("authorization", [None, "Bearer invalid-token"])
 @pytest.mark.parametrize("method,path,body", [
+    ("GET", "/auth/me", None),
     ("GET", "/leads", None),
     ("POST", "/leads", {"name": "Иван", "contact": "ivan@example.com"}),
     ("PATCH", f"/leads/{LEAD_ID}", {"status": "done"}),
@@ -132,6 +140,7 @@ def test_wrong_pin_is_rejected(client):
     ("GET", "/tags", None),
     ("POST", "/tags", {"name": "Веб-форма"}),
     ("POST", f"/leads/{LEAD_ID}/tags/{TAG_ID}", None),
+    ("DELETE", f"/leads/{LEAD_ID}/tags/{TAG_ID}", None),
 ])
 def test_protected_routes_require_valid_jwt(client, method, path, body, authorization):
     api, calls = client
@@ -139,6 +148,31 @@ def test_protected_routes_require_valid_jwt(client, method, path, body, authoriz
     response = api.request(method, path, json=body, headers=headers)
     assert response.status_code == 401
     assert calls == []
+
+
+def test_me_preserves_manager_role_for_pin_session(client):
+    api, _ = client
+    token = api.post('/auth/pin', json={'pin': '2026'}).json()['access_token']
+    api.database_user['role'] = 'admin'
+    response = api.get('/auth/me', headers={'Authorization': f'Bearer {token}'})
+    assert response.status_code == 200
+    assert response.json()['role'] == 'manager'
+    assert response.headers['Cache-Control'] == 'no-store'
+
+
+def test_manager_can_remove_tag_without_deleting_lead(client):
+    api, _ = client
+    api.saved_leads[LEAD_ID] = {
+        'id': LEAD_ID, 'name': 'Иван', 'contact': 'ivan@example.com', 'request': 'Нужен сайт',
+        'source': 'manual', 'status': 'new', 'created_at': '2026-01-01T00:00:00Z',
+        'updated_at': '2026-01-01T00:00:00Z',
+        'tags': [{'id': TAG_ID, 'name': 'Приоритетный', 'color': '#A3E635'}],
+    }
+    token = api.post('/auth/pin', json={'pin': '2026'}).json()['access_token']
+    response = api.delete(f'/leads/{LEAD_ID}/tags/{TAG_ID}', headers={'Authorization': f'Bearer {token}'})
+    assert response.status_code == 200
+    assert response.json()['tags'] == []
+    assert LEAD_ID in api.saved_leads
 
 
 TELEGRAM_HEADERS = {"X-Telegram-Bot-Api-Secret-Token": "telegram-test-secret-at-least-32-chars"}

@@ -10,6 +10,7 @@ FastAPI + асинхронный Supabase Client, без ORM.
 - `backend/.env.example` — пример общей конфигурации.
 - `backend/Dockerfile` — простой образ для запуска API.
 - `backend/tests/test_api.py` — базовые HTTP-тесты без подключения к реальной БД.
+- `frontend/` — React/Vite/TypeScript, Tailwind CSS и панели Vaul; браузер и Telegram Mini App.
 - `migrations/001_initial_schema.sql` — SQL из предыдущего шага.
 - `migrations/20261005083640_bot_lead_creation.sql` — атомарное создание заявки бота с тегом.
 
@@ -91,10 +92,55 @@ Auto-Deploy; иначе выбрать Manual Deploy → Deploy latest commit.
 
 - `POST /auth/telegram` — подписанный `initData`, проверка HMAC и `auth_date`, JWT. Telegram ID сотрудника должен быть заранее добавлен в `users`.
 - `POST /auth/pin` — JWT тестового менеджера.
+- `GET /auth/me` — текущий сотрудник и эффективная роль, требуется JWT.
 - `GET /leads`, `POST /leads`, `PATCH /leads/{id}`, `DELETE /leads/{id}`.
 - `GET /tags`, `POST /tags`, `POST /leads/{id}/tags/{tag_id}`.
-- Все CRUD-маршруты требуют JWT; удаление — только admin. Роль читается из БД.
+- `DELETE /leads/{id}/tags/{tag_id}` — снять тег, доступно менеджеру с JWT.
+- Все CRUD-маршруты требуют JWT; удаление лида — только admin. Роль читается из БД.
 - `GET /leads` поддерживает `status`, `tag_id`, `next_contact_date`, `limit`, `offset`.
+
+## React: локальный запуск
+
+Node.js 22.12+ (рекомендуется 24). Запустить backend командой выше, затем во втором терминале:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Открыть http://localhost:5173. По умолчанию фронтенд обращается к http://localhost:8000.
+Для другого API задать `VITE_API_URL` в `frontend/.env.local`. В браузере — PIN 2026;
+в Telegram подписанный `initData` обменивается на JWT. Telegram ID сотрудника должен быть
+заранее зарегистрирован в `users`; заявка боту не выдаёт доступ к CRM.
+Невалидный `initData` не переключает пользователя на PIN-вход.
+
+Список обновляется каждые 30 секунд, пока вкладка видима, и при возврате в окно.
+Доступны фильтры по статусу и одному тегу, страницы по 12 лидов, ручное создание,
+редактирование, назначение/снятие тегов и создание цветных тегов. Удаление лида — только admin.
+Сессия браузера хранится в sessionStorage, в Telegram — в памяти; выход очищает её.
+Сохранение лида и изменение его тегов — отдельные запросы; при частичном сбое интерфейс
+сохраняет ID созданного лида и предлагает повторить сохранение.
+
+Проверка сборки:
+
+```bash
+npm run build
+```
+
+## Деплой frontend на Vercel
+
+1. Обновить Render до версии с `/auth/me` и снятием тегов, затем импортировать тот же GitHub-репозиторий в Vercel.
+2. Root Directory: `frontend`; Framework Preset: Vite; Build Command: `npm run build`; Output Directory: `dist`; Node.js: 24.x.
+3. Добавить публичную переменную `VITE_API_URL=https://jump-mini-crm.onrender.com` и выполнить Deploy.
+4. В Render задать `CORS_ORIGINS` как JSON-массив с точным доменом Vercel без завершающего `/`,
+   например `["https://your-project.vercel.app","http://localhost:5173"]`. Сохранить и дождаться рестарта.
+5. Проверить PIN-вход и ручное создание по ссылке Vercel. Для доступа проверяющего ссылка должна открываться без Vercel-login.
+6. В BotFather настроить Menu Button бота на этот же HTTPS-адрес. Открыть приложение от зарегистрированного сотрудника
+   и проверить Telegram-вход, MainButton и возврат из формы через BackButton.
+
+В Vercel не нужны ключ Supabase, JWT_SECRET, токен бота и секреты вебхуков.
+Маршрутизация MVP находится на `/`, дополнительный `vercel.json` не требуется.
 
 ## Вебхук
 

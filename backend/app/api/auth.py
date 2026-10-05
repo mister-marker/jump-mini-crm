@@ -4,11 +4,18 @@ from time import monotonic
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from app.api.deps import DatabaseDep, SettingsDep
+from app.api.deps import CurrentUser, DatabaseDep, SettingsDep
 from app.core.security import create_access_token, unauthorized, validate_init_data
 from app.models.schemas import PinLogin, TelegramLogin, TokenResponse, User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+@router.get("/me", response_model=User)
+async def current_user(user: CurrentUser, response: Response) -> User:
+    """Expose the effective role, including the manager-only PIN session."""
+    response.headers["Cache-Control"] = "no-store"
+    return user
 
 
 class LoginLimiter:
