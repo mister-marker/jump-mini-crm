@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import Field, HttpUrl, SecretStr, field_validator
+from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     supabase_url: HttpUrl
     supabase_service_role_key: SecretStr
     telegram_bot_token: SecretStr
+    telegram_webhook_secret: SecretStr | None = None
+    telegram_webhook_url: HttpUrl | None = None
     jwt_secret: SecretStr
     jwt_issuer: str = "jump-crm"
     jwt_audience: str = "jump-crm-api"
@@ -29,6 +31,30 @@ class Settings(BaseSettings):
     demo_manager_id: UUID = UUID("00000000-0000-4000-8000-000000000026")
     webhook_secret: SecretStr
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+
+    @field_validator("telegram_webhook_secret")
+    @classmethod
+    def valid_telegram_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None:
+            secret = value.get_secret_value()
+            if not 32 <= len(secret) <= 256 or any(
+                char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+                for char in secret
+            ):
+                raise ValueError("Telegram webhook secret must be 32–256 URL-safe characters")
+        return value
+
+    @model_validator(mode="after")
+    def valid_webhook_config(self) -> "Settings":
+        if self.telegram_webhook_url is not None:
+            if self.telegram_webhook_secret is None:
+                raise ValueError("TELEGRAM_WEBHOOK_SECRET is required with TELEGRAM_WEBHOOK_URL")
+            if (self.telegram_webhook_url.scheme != "https"
+                    or self.telegram_webhook_url.path != "/api/webhooks/telegram"
+                    or self.telegram_webhook_url.query or self.telegram_webhook_url.fragment
+                    or self.telegram_webhook_url.username or self.telegram_webhook_url.password):
+                raise ValueError("Use an HTTPS URL ending in /api/webhooks/telegram")
+        return self
 
     @field_validator("jwt_secret")
     @classmethod

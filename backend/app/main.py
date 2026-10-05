@@ -14,15 +14,27 @@ from app.api import auth, leads, tags, webhooks
 from app.api.deps import DatabaseDep
 from app.core.config import get_settings
 from app.core.supabase import create_supabase
+from bot.main import BotRuntime
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    db = await create_supabase(get_settings())
+    settings = get_settings()
+    db = await create_supabase(settings)
     application.state.supabase = db
+    application.state.telegram = None
     try:
+        if settings.telegram_webhook_secret is not None:
+            runtime = BotRuntime(settings, db)
+            application.state.telegram = runtime
+            try:
+                await runtime.start()
+            except Exception:
+                raise RuntimeError("Telegram webhook setup failed; check bot configuration") from None
         yield
     finally:
+        if application.state.telegram is not None:
+            await application.state.telegram.close()
         await db.postgrest.aclose()
         await db.auth.close()
         await db.realtime.close()

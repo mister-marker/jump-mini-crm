@@ -1,13 +1,41 @@
 import hmac
+import logging
 
-from fastapi import APIRouter, HTTPException
+from aiogram.types import Update
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from app.api.deps import DatabaseDep, SettingsDep
 from app.models.schemas import ExternalLead, WebhookResult
 from app.services.webhook_filter import is_spam
 
 router = APIRouter(prefix="/api/webhooks", tags=["Webhooks"])
+logger = logging.getLogger(__name__)
+
+
+@router.post("/telegram")
+async def telegram_webhook(request: Request, settings: SettingsDep) -> dict[str, bool]:
+    secret = settings.telegram_webhook_secret
+    if secret is None:
+        raise HTTPException(503, "Telegram webhook is not configured")
+    supplied = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not hmac.compare_digest(supplied.encode(), secret.get_secret_value().encode()):
+        raise HTTPException(401, "Invalid webhook credentials")
+    runtime = request.app.state.telegram
+    if runtime is None:
+        raise HTTPException(503, "Telegram webhook is not configured")
+    try:
+        update = Update.model_validate(await request.json(), context={"bot": runtime.bot})
+    except (ValueError, ValidationError):
+        raise HTTPException(400, "Invalid Telegram update") from None
+    try:
+        await runtime.process(update)
+    except Exception as exc:
+        # Telegram retries non-2xx responses. Never log tokens, contact data or SDK URLs.
+        logger.warning("Telegram update %s failed (%s)", update.update_id, type(exc).__name__)
+        raise HTTPException(503, "Unable to process Telegram update; retry later") from None
+    return {"ok": True}
 
 
 @router.post("/external", response_model=WebhookResult, status_code=201)
