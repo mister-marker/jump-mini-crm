@@ -156,7 +156,7 @@ def send_update(api, number, text=None, **message_fields):
 
 def fill_application(api, start=1):
     for number, text in enumerate(
-        ["/start", "Иван", "ivan@example.com", "Нужен лендинг для стартапа"], start
+        ["/start", "Иван", "Email", "ivan@example.com", "Нужен лендинг для стартапа"], start
     ):
         assert send_update(api, number, text).status_code == 200
 
@@ -181,9 +181,9 @@ def test_bot_full_flow_confirmation_and_duplicates(client):
     api, calls = client
     fill_application(api)
     assert not api.saved_leads  # A preview is not a submitted application.
-    assert send_update(api, 5, "Отправить заявку").status_code == 200
+    assert send_update(api, 6, "Отправить заявку").status_code == 200
     reply_count = len(api.replies)
-    assert send_update(api, 5, "Отправить заявку").status_code == 200
+    assert send_update(api, 6, "Отправить заявку").status_code == 200
     assert len(api.replies) == reply_count
     assert len(api.saved_leads) == 1
     lead = next(iter(api.saved_leads.values()))
@@ -191,7 +191,7 @@ def test_bot_full_flow_confirmation_and_duplicates(client):
     assert lead["tags"][0]["name"] == "Telegram-бот"
     assert len(calls) == 1
     fill_application(api, start=10)
-    assert send_update(api, 14, "Отправить заявку").status_code == 200
+    assert send_update(api, 15, "Отправить заявку").status_code == 200
     assert len(api.saved_leads) == 2  # Same person may submit a new application.
 
 
@@ -199,8 +199,8 @@ def test_bot_full_flow_confirmation_and_duplicates(client):
 def test_bot_cancel_does_not_create_lead(client, cancel):
     api, calls = client
     fill_application(api)
-    assert send_update(api, 5, cancel).status_code == 200
-    assert send_update(api, 6, "Отправить заявку").status_code == 200
+    assert send_update(api, 6, cancel).status_code == 200
+    assert send_update(api, 7, "Отправить заявку").status_code == 200
     assert not calls
     assert " /start" in api.replies[-1].text
 
@@ -210,18 +210,19 @@ def test_bot_duplicate_field_does_not_advance_state(client):
     send_update(api, 1, "/start")
     send_update(api, 2, "Иван")
     send_update(api, 2, "Иван")
-    send_update(api, 3, "ivan@example.com")
-    send_update(api, 4, "Нужен сайт")
-    assert "Контакт: ivan@example.com" in api.replies[-1].text
+    send_update(api, 3, "Email")
+    send_update(api, 4, "ivan@example.com")
+    send_update(api, 5, "Нужен сайт")
+    assert "Связь (Email): ivan@example.com" in api.replies[-1].text
 
 
 def test_bot_retries_database_failure(client):
     api, _ = client
     fill_application(api)
     api.failures["database"] = True
-    assert send_update(api, 5, "Отправить заявку").status_code == 503
+    assert send_update(api, 6, "Отправить заявку").status_code == 503
     assert not api.saved_leads
-    assert send_update(api, 5, "Отправить заявку").status_code == 200
+    assert send_update(api, 6, "Отправить заявку").status_code == 200
     assert len(api.saved_leads) == 1
 
 
@@ -229,9 +230,9 @@ def test_bot_reply_failure_after_commit_does_not_duplicate_lead(client):
     api, calls = client
     fill_application(api)
     api.failures["reply"] = True
-    assert send_update(api, 5, "Отправить заявку").status_code == 503
+    assert send_update(api, 6, "Отправить заявку").status_code == 503
     assert len(api.saved_leads) == 1
-    assert send_update(api, 5, "Отправить заявку").status_code == 200
+    assert send_update(api, 6, "Отправить заявку").status_code == 200
     assert len(api.saved_leads) == 1
     assert len(calls) == 2
     assert json.loads(calls[0].content)["p_id"] == json.loads(calls[1].content)["p_id"]
@@ -243,13 +244,16 @@ def test_bot_validation_and_phone_without_username(client):
     send_update(api, 2, "   ")
     assert "Введите имя" in api.replies[-1].text
     send_update(api, 3, "Иван")
-    send_update(api, 4, contact={"phone_number": "+79990000000", "first_name": "Друг", "user_id": 102})
+    assert all(not button.request_contact for row in api.replies[-1].reply_markup.keyboard for button in row)
+    send_update(api, 4, "Телефон")
+    assert api.replies[-1].reply_markup.keyboard[0][0].request_contact is True
+    send_update(api, 5, contact={"phone_number": "+79990000000", "first_name": "Друг", "user_id": 102})
     assert "своим контактом" in api.replies[-1].text
-    send_update(api, 5, contact={"phone_number": "+79990000000", "first_name": "Иван", "user_id": 101})
-    send_update(api, 6, "   ")
+    send_update(api, 6, contact={"phone_number": "+79990000000", "first_name": "Иван", "user_id": 101})
+    send_update(api, 7, "   ")
     assert "Опишите задачу" in api.replies[-1].text
-    send_update(api, 7, "Нужен сайт")
-    send_update(api, 8, "Отправить заявку")
+    send_update(api, 8, "Нужен сайт")
+    send_update(api, 9, "Отправить заявку")
     assert next(iter(api.saved_leads.values()))["contact"] == "+79990000000"
 
 
@@ -259,6 +263,49 @@ def test_bot_ignores_groups_and_unsupported_updates(client):
     response = api.post("/api/webhooks/telegram", headers=TELEGRAM_HEADERS, json={"update_id": 2})
     assert response.status_code == 200
     assert not api.replies and not calls
+
+
+def test_bot_contact_choice_and_email_do_not_request_phone(client):
+    api, _ = client
+    send_update(api, 1, "/start")
+    send_update(api, 2, "Иван")
+    labels = [button.text for row in api.replies[-1].reply_markup.keyboard for button in row]
+    assert "Telegram" not in labels  # This user has no username.
+    send_update(api, 3, "ivan@example.com")
+    assert "Выберите один способ" in api.replies[-1].text
+    send_update(api, 4, "Email")
+    assert all(not button.request_contact for row in api.replies[-1].reply_markup.keyboard for button in row)
+    send_update(api, 5, "+79991234567")
+    assert "Введите email" in api.replies[-1].text
+    send_update(api, 6, "ivan@example.com")
+    send_update(api, 7, "Нужен сайт")
+    send_update(api, 8, "Отправить заявку")
+    assert next(iter(api.saved_leads.values()))["contact"] == "ivan@example.com"
+
+
+def test_bot_telegram_contact_uses_senders_username(client):
+    api, _ = client
+    sender = {"id": 101, "is_bot": False, "first_name": "Иван", "username": "ivan_crm"}
+    for number, text in enumerate(["/start", "Иван", "Telegram", "Нужен сайт", "Отправить заявку"], 1):
+        assert send_update(api, number, text, **{"from": sender}).status_code == 200
+    assert next(iter(api.saved_leads.values()))["contact"] == "@ivan_crm"
+    assert not any(button.request_contact for reply in api.replies
+                   if hasattr(reply.reply_markup, "keyboard")
+                   for row in reply.reply_markup.keyboard for button in row)
+
+
+def test_bot_can_change_contact_method_and_normalizes_phone(client):
+    api, _ = client
+    for number, text in enumerate([
+        "/start", "Иван", "Email", "Другой способ связи", "Телефон", "ivan@example.com",
+    ], 1):
+        send_update(api, number, text)
+    assert "Введите номер" in api.replies[-1].text
+    send_update(api, 7, "+7 (999) 123-45-67")
+    send_update(api, 8, "Нужен сайт")
+    assert "Связь (Телефон): +79991234567" in api.replies[-1].text
+    send_update(api, 9, "Отправить заявку")
+    assert next(iter(api.saved_leads.values()))["contact"] == "+79991234567"
 
 
 def test_bot_registration_preserves_pending_updates(client):
@@ -279,7 +326,7 @@ def test_bot_concurrent_delivery_creates_one_lead(client):
     api, calls = client
     fill_application(api)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(lambda _: send_update(api, 5, "Отправить заявку"), range(2)))
+        responses = list(pool.map(lambda _: send_update(api, 6, "Отправить заявку"), range(2)))
     assert [response.status_code for response in responses] == [200, 200]
     assert len(api.saved_leads) == 1
     assert len(calls) == 1
