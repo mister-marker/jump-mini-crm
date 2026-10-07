@@ -16,6 +16,9 @@ export default function LeadSheet({ lead, tags, sources, user, onSourceAdded, on
   const [selected, setSelected] = useState(() => new Set(lead?.tags.map(tag => tag.id) || []))
   const [source, setSource] = useState(lead?.source || '')
   const [newSource, setNewSource] = useState('')
+  const [addingSource, setAddingSource] = useState(false)
+  const sourcePending = useRef(false)
+  const [sourceError, setSourceError] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -23,17 +26,19 @@ export default function LeadSheet({ lead, tags, sources, user, onSourceAdded, on
   function toggle(id: string) { setSelected(previous => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
 
   async function addSource() {
-    if (!newSource.trim()) return
-    setBusy(true); setError('')
+    if (!newSource.trim() || sourcePending.current || busy) return
+    sourcePending.current = true
+    setAddingSource(true); setSourceError('')
     try {
       const created = await api.createSource(newSource.trim())
       onSourceAdded(created); setSource(created.id); setNewSource('')
-    } catch (e) { setError(errorText(e)) }
-    finally { setBusy(false) }
+    } catch (e) { setSourceError(errorText(e)) }
+    finally { sourcePending.current = false; setAddingSource(false) }
   }
 
   async function save(event: FormEvent) {
     event.preventDefault()
+    if (busy || sourcePending.current) return
     if (!fields.name.trim() || !fields.contact.trim()) { setError('Укажите имя и контакт.'); return }
     if (!persisted.current && !source) { setError('Выберите источник лида.'); return }
     setBusy(true); setError('')
@@ -70,7 +75,7 @@ export default function LeadSheet({ lead, tags, sources, user, onSourceAdded, on
     finally { setBusy(false) }
   }
 
-  return <Sheet title={record ? 'Карточка лида' : 'Новый лид'} description={record ? new Date(record.created_at).toLocaleDateString('ru-RU') : 'Добавьте обращение — контакт и задача будут под рукой.'} busy={busy} onClose={onClose}>
+  return <Sheet title={record ? 'Карточка лида' : 'Новый лид'} description={record ? new Date(record.created_at).toLocaleDateString('ru-RU') : 'Добавьте обращение — контакт и задача будут под рукой.'} busy={busy || addingSource} onClose={onClose}>
     <form onSubmit={save} className="lead-form">
       <div className="sheet-body" data-vaul-no-drag><fieldset disabled={busy}>
         <label htmlFor="lead-name">Имя <span>*</span></label>
@@ -79,11 +84,23 @@ export default function LeadSheet({ lead, tags, sources, user, onSourceAdded, on
         <input id="lead-contact" value={fields.contact} onChange={e => update('contact', e.target.value)} maxLength={320} required placeholder="Телефон, email или @username" autoComplete="off" />
         {record ? <div className="source-readonly"><span>Источник</span><strong>{sourceName(record.source, sources)}</strong></div> : <>
           <label htmlFor="lead-source">Источник <span>*</span></label>
-          <select id="lead-source" value={source} onChange={e => setSource(e.target.value)} required>
+          <select id="lead-source" value={source} onChange={e => setSource(e.target.value)} required disabled={addingSource}>
             <option value="" disabled>Откуда пришёл лид?</option>
             {sources.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          {user.role === 'admin' && <div className="new-source"><input aria-label="Название нового источника" value={newSource} onChange={e => setNewSource(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void addSource() } }} maxLength={64} placeholder="Новый источник, например: Рекомендация" /><button type="button" className="btn secondary" onClick={() => void addSource()} disabled={!newSource.trim() || busy}><Plus size={15} />Добавить</button></div>}
+          {user.role === 'admin' && <>
+            <div className="new-source">
+              <input aria-label="Название нового источника" value={newSource} disabled={addingSource}
+                onChange={e => setNewSource(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void addSource() } }}
+                maxLength={64} placeholder="Новый источник, например: Рекомендация" />
+              <button type="button" className="btn secondary" onClick={() => void addSource()} disabled={!newSource.trim() || addingSource}>
+                {addingSource ? <LoaderCircle className="spin" size={15} /> : <Plus size={15} />}
+                {addingSource ? 'Добавляем…' : 'Добавить'}
+              </button>
+            </div>
+            {sourceError && <p className="error-box" role="alert">{sourceError}</p>}
+          </>}
         </>}
         <label htmlFor="lead-request">Задача клиента</label>
         <textarea id="lead-request" value={fields.request || ''} onChange={e => update('request', e.target.value)} maxLength={10000} rows={4} placeholder="Что нужно сделать? Добавьте детали обращения." />
@@ -97,7 +114,7 @@ export default function LeadSheet({ lead, tags, sources, user, onSourceAdded, on
         {error && <p className="error-box" role="alert">{error}</p>}
         {record && user.role === 'admin' && <div className="delete-area">{deleting ? <><p>Удалить лид? Восстановить его будет нельзя.</p><div className="inline-actions"><button type="button" className="btn danger" onClick={() => void remove()}>Удалить безвозвратно</button><button type="button" className="btn secondary" onClick={() => setDeleting(false)}>Отмена</button></div></> : <button type="button" className="text-button danger-text" onClick={() => setDeleting(true)}><Trash2 size={16} /> Удалить лид</button>}</div>}
       </fieldset></div>
-      <footer className="sheet-footer"><button className="btn secondary" type="button" onClick={onClose} disabled={busy}>Отмена</button><button className="btn primary" type="submit" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18} /> : <Check size={18} />}{busy ? 'Сохраняем…' : record ? 'Сохранить изменения' : 'Создать лида'}</button></footer>
+      <footer className="sheet-footer"><button className="btn secondary" type="button" onClick={onClose} disabled={busy || addingSource}>Отмена</button><button className="btn primary" type="submit" disabled={busy || addingSource}>{busy ? <LoaderCircle className="spin" size={18} /> : <Check size={18} />}{busy ? 'Сохраняем…' : record ? 'Сохранить изменения' : 'Создать лида'}</button></footer>
     </form>
   </Sheet>
 }
