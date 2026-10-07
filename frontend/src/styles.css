@@ -164,7 +164,7 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 
 .sheet-overlay { position: fixed; inset: 0; background: #03070bbd; backdrop-filter: blur(4px); z-index: 10; }
 .sheet { position: fixed; bottom: 0; left: 0; right: 0; margin: 0 auto; max-width: 600px; max-height: 93dvh; display: flex; flex-direction: column; background: #172130; color: #eef3fa; border: 1px solid #3c4a60; border-bottom: 0; border-radius: 24px 24px 0 0; z-index: 11; outline: none; box-shadow: 0 -10px 80px #0004; }
-.sheet-handle { width: 40px; height: 4px; background: #4a596c; border-radius: 5px; margin: 12px auto 0; flex-shrink: 0; }
+.sheet-handle[data-vaul-handle] { width: 40px; height: 4px; background: #4a596c; border-radius: 5px; margin: 12px auto 0; flex-shrink: 0; }
 .sheet-header { display: flex; justify-content: space-between; gap: 15px; align-items: flex-start; padding: 23px 28px 20px; border-bottom: 1px solid #2d3b4e; flex-shrink: 0; }
 .sheet-header h2 { font-size: 24px; font-weight: 550; margin: 0 0 8px; letter-spacing: -.6px; }
 .sheet-header p { font-size: 12px; color: #93a3ba; margin: 0; line-height: 1.6; }

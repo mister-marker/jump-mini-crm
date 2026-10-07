@@ -13,11 +13,12 @@ export default function Sheet({ title, description, busy = false, onClose, child
     button?.onClick(close)
     return () => { button?.offClick(close); button?.hide() }
   }, [busy, onClose])
-  return <Drawer.Root open onOpenChange={open => { if (!open && !busy) onClose() }} dismissible={!busy}>
+  // Native selects/date pickers must not start Vaul's pointer capture for dragging.
+  return <Drawer.Root open handleOnly onOpenChange={open => { if (!open && !busy) onClose() }} dismissible={!busy}>
     <Drawer.Portal>
       <Drawer.Overlay className="sheet-overlay" />
       <Drawer.Content className="sheet" aria-describedby="sheet-description">
-        <div className="sheet-handle" aria-hidden="true" />
+        <Drawer.Handle className="sheet-handle" />
         <header className="sheet-header"><div><Drawer.Title>{title}</Drawer.Title>
           <Drawer.Description id="sheet-description">{description}</Drawer.Description></div>
           <button className="icon-button" aria-label="Закрыть" onClick={onClose} disabled={busy}><X size={20} /></button>
